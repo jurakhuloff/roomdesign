@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Дизайн комнаты 3D</title>
+<style>
+:root{--bg:#f4f1ec;--pn:#fff;--tx:#222;--bd:#d8d4cc;--ac:#3b6ea5;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#1b1b1d;--pn:#2a2a2d;--tx:#eee;--bd:#444;--ac:#7fb0e6}}
+:root[data-theme="dark"]{--bg:#1b1b1d;--pn:#2a2a2d;--tx:#eee;--bd:#444;--ac:#7fb0e6}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--tx);font:14px system-ui,-apple-system,"Segoe UI",sans-serif;display:flex;flex-direction:column}
+#v{flex:1;min-height:0;position:relative;touch-action:none}
+#v canvas{display:block;width:100%;height:100%}
+#hint{position:absolute;left:8px;top:8px;font-size:12px;opacity:.7;background:var(--pn);padding:4px 8px;border-radius:6px}
+#p{background:var(--pn);border-top:1px solid var(--bd);max-height:40%;overflow-y:auto;padding:8px 12px}
+h4{margin:8px 0 4px;font-size:13px}
+.row{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.sw{width:34px;height:34px;border-radius:8px;border:2px solid var(--bd);cursor:pointer;padding:0}
+.sw.on{border-color:var(--ac)}
+button.b{background:var(--bg);color:var(--tx);border:1px solid var(--bd);border-radius:8px;padding:7px 10px;cursor:pointer;font:inherit}
+button.b:hover{border-color:var(--ac)}
+label{display:flex;gap:6px;align-items:center}
+input[type=number]{width:68px;padding:4px;border:1px solid var(--bd);border-radius:6px;background:var(--bg);color:var(--tx);font:inherit}
+select{padding:4px;border-radius:6px;background:var(--bg);color:var(--tx);border:1px solid var(--bd)}
+</style></head>
+<body>
+<div id="v"><div id="hint">Тяните комнату — вращение. Тяните мебель — перемещение. Колесо/щипок — масштаб.</div></div>
+<div id="p">
+<h4>Куда наносить</h4><select id="tgt"><option value="all">Все стены</option><option value="0">Задняя стена</option><option value="1">Передняя стена</option><option value="2">Левая стена</option><option value="3">Правая стена</option></select>
+<h4>Краска для стен</h4><div class="row" id="paints"></div>
+<h4>Обои и плитка</h4><div class="row" id="papers"></div>
+<h4>Пол</h4><div class="row" id="floors"></div>
+<h4>Размеры комнаты (в сантиметрах)</h4><div class="row">
+<label>Ширина <input type="number" id="rw" value="500"></label>
+<label>Длина <input type="number" id="rd" value="400"></label>
+<label>Высота <input type="number" id="rh" value="270"></label></div>
+<div id="info" style="margin-top:4px;opacity:.85"></div>
+<h4>Двери и окна (стена смотрится изнутри комнаты)</h4>
+<div class="row"><button class="b" id="addD">+ Дверь</button><button class="b" id="addW">+ Окно</button></div>
+<div id="ops" style="margin-top:6px"></div>
+<h4>Перегородки (все размеры в см)</h4>
+<div class="row"><button class="b" id="addP">+ Перегородка</button></div><div id="pts" style="margin-top:6px"></div>
+<h4>Добавить мебель</h4><div class="row" id="furn"></div>
+<h4>Выбранный предмет</h4><div class="row" id="sel">
+<button class="b" id="rot">⟳ Повернуть</button><button class="b" id="del">🗑 Удалить</button>
+<span id="tints" class="row"></span></div>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+const $=id=>document.getElementById(id), box=$('v');
+const R=new THREE.WebGLRenderer({antialias:true});R.setPixelRatio(Math.min(devicePixelRatio,2));box.appendChild(R.domElement);
+const S=new THREE.Scene(),C=new THREE.PerspectiveCamera(50,1,.1,100);
+S.add(new THREE.HemisphereLight(0xffffff,0x887766,.8));
+const sun=new THREE.DirectionalLight(0xffffff,.6);sun.position.set(3,6,4);S.add(sun);
+let th=.6,ph=1.0,dist=9;
+function cam(){C.position.set(dist*Math.sin(ph)*Math.sin(th),dist*Math.cos(ph),dist*Math.sin(ph)*Math.cos(th));C.lookAt(0,1,0)}
+function fit(){const w=box.clientWidth,h=box.clientHeight;R.setSize(w,h,false);C.aspect=w/h;C.updateProjectionMatrix()}
+new ResizeObserver(fit).observe(box);
+
+// textures
+function tex(draw,w,h,rx,ry){const c=document.createElement('canvas');c.width=c.height=128;draw(c.getContext('2d'));
+const t=new THREE.CanvasTexture(c);t.wrapS=t.wrapT=THREE.RepeatWrapping;t.repeat.set(rx,ry);return t}
+const papers=[
+{n:'Полоска',d:x=>{x.fillStyle='#efe6d2';x.fillRect(0,0,128,128);x.fillStyle='#c9b48a';for(let i=0;i<128;i+=32)x.fillRect(i,0,12,128)},c:'#d9c9a5'},
+{n:'Горошек',d:x=>{x.fillStyle='#cfe3e0';x.fillRect(0,0,128,128);x.fillStyle='#fff';[[32,32],[96,96]].forEach(p=>{x.beginPath();x.arc(p[0],p[1],10,0,7);x.fill()})},c:'#cfe3e0'},
+{n:'Ромбы',d:x=>{x.fillStyle='#2f4858';x.fillRect(0,0,128,128);x.strokeStyle='#d4a373';x.lineWidth=3;x.beginPath();x.moveTo(64,8);x.lineTo(120,64);x.lineTo(64,120);x.lineTo(8,64);x.closePath();x.stroke()},c:'#2f4858'},
+{n:'Кирпич',d:x=>{x.fillStyle='#a8553f';x.fillRect(0,0,128,128);x.fillStyle='#d9cfc4';for(let r=0;r<4;r++){x.fillRect(0,r*32,128,3);for(let k=0;k<2;k++)x.fillRect((r%2?32:0)+k*64,r*32,3,32)}},c:'#a8553f'}];
+const floors=[
+{n:'Дерево',d:x=>{x.fillStyle='#b98a5a';x.fillRect(0,0,128,128);x.fillStyle='#8f6a42';for(let i=0;i<128;i+=32)x.fillRect(0,i,128,2);x.fillRect(40,0,2,32);x.fillRect(90,32,2,32)},c:'#b98a5a'},
+{n:'Светлый',d:x=>{x.fillStyle='#e6d9c0';x.fillRect(0,0,128,128);x.fillStyle='#cdbd9f';for(let i=0;i<128;i+=32)x.fillRect(0,i,128,2)},c:'#e6d9c0'},
+{n:'Плитка',d:x=>{x.fillStyle='#c8c8c8';x.fillRect(0,0,128,128);x.fillStyle='#8a8a8a';x.fillRect(0,0,128,3);x.fillRect(0,0,3,128)},c:'#c8c8c8'}];
+const grid=(bg,ln,n)=>x=>{x.fillStyle=bg;x.fillRect(0,0,128,128);x.fillStyle=ln;const k=128/n;for(let i=0;i<128;i+=k){x.fillRect(i,0,2,128);x.fillRect(0,i,128,2)}};
+const marble=x=>{x.fillStyle='#eeeeee';x.fillRect(0,0,128,128);x.strokeStyle='#a9a9a9';x.lineWidth=1.5;x.beginPath();x.moveTo(0,20);x.bezierCurveTo(40,60,80,0,128,50);x.stroke();x.beginPath();x.moveTo(0,90);x.bezierCurveTo(30,70,90,120,128,100);x.stroke()};
+papers.push({n:'Плитка белая',d:grid('#f1f1ee','#c4c4be',4),c:'#f1f1ee'},
+{n:'Плитка метро',d:x=>{x.fillStyle='#fafafa';x.fillRect(0,0,128,128);x.fillStyle='#bdbdbd';for(let r=0;r<8;r++){x.fillRect(0,r*16,128,2);for(let k=0;k<4;k++)x.fillRect((r%2?16:0)+k*32,r*16,2,16)}},c:'#fafafa'},
+{n:'Мозаика',d:x=>{x.fillStyle='#ddd';x.fillRect(0,0,128,128);const p=['#4a90a4','#6bb0c2','#2f6f85','#8cc6d4'];for(let i=0;i<16;i++)for(let j=0;j<16;j++){x.fillStyle=p[(i*7+j*3)%4];x.fillRect(i*8,j*8,7,7)}},c:'#4a90a4'},
+{n:'Мрамор',d:marble,c:'#eeeeee'},
+{n:'Антрацит',d:grid('#3a3d40','#222',4),c:'#3a3d40'});
+floors.push({n:'Мрамор',d:marble,c:'#e4e4e4'},{n:'Тёмная плитка',d:grid('#4a4d50','#2a2c2e',4),c:'#4a4d50'},
+{n:'Серый ламинат',d:x=>{x.fillStyle='#9a9a97';x.fillRect(0,0,128,128);x.fillStyle='#7c7c79';for(let i=0;i<128;i+=32)x.fillRect(0,i,128,2);x.fillRect(60,0,2,32);x.fillRect(20,64,2,32)},c:'#9a9a97'});
+const paints=['#f2ece1','#cfe0d6','#bcd4e6','#e8c4c4','#d9c7a3','#4a5d73','#7d8f69','#f0d58c'];
+
+let wallSet={paint:'#f2ece1'},floorSet=floors[0],W=5,D=4,H=2.7,room=new THREE.Group();S.add(room);
+let OP=[{t:'door',w:0,p:150,wd:90,h:205,s:0},{t:'win',w:2,p:140,wd:120,h:140,s:90}];
+const WN=['Задняя','Передняя','Левая','Правая'];
+function lens(){return [W,W,D,D]}
+let WS=[null,null,null,null],tgt='all';
+function wallMat(w){if(w.paint)return new THREE.MeshStandardMaterial({color:w.paint});
+return new THREE.MeshStandardMaterial({map:tex(w.d,128,128,1,1)})}
+function setWall(v){if(tgt==='all'){wallSet=v;WS=[null,null,null,null]}else WS[tgt]=v;build()}
+$('tgt').onchange=e=>{tgt=e.target.value==='all'?'all':+e.target.value};
+function fixOp(o){const L=lens()[o.w]*100,HH=H*100;o.wd=Math.max(30,Math.min(o.wd||90,L-10));o.p=Math.max(0,Math.min(o.p||0,L-o.wd));
+o.s=Math.max(0,Math.min(o.s||0,HH-30));o.h=Math.max(30,Math.min(o.h||100,HH-o.s))}
+function addOp(g,o,cx,y0,y1){const w=o.wd/100,h=o.h/100,dr=o.t==='door',fc=dr?'#6e4a24':'#f3f3f3';
+const m=(a,b,c,x,y,col,op)=>{const q=new THREE.Mesh(new THREE.BoxGeometry(a,b,c),new THREE.MeshStandardMaterial({color:col,transparent:!!op,opacity:op||1}));q.position.set(x,y,0);g.add(q)};
+m(w+.08,.05,.1,cx,y1+.02,fc);m(.05,h,.1,cx-w/2-.02,y0+h/2,fc);m(.05,h,.1,cx+w/2+.02,y0+h/2,fc);
+if(dr){m(w-.02,h-.02,.04,cx,y0+h/2,'#a8743e');m(.05,.05,.1,cx+w/2-.1,y0+h/2,'#d4af37')}
+else{m(w,.05,.14,cx,y0-.01,fc);m(w,h,.01,cx,y0+h/2,'#9fd0ff',.35);m(.03,h,.03,cx,y0+h/2,fc);m(w,.03,.03,cx,y0+h/2,fc)}}
+function build(){room.clear();
+const f=new THREE.Mesh(new THREE.PlaneGeometry(W,D),new THREE.MeshStandardMaterial({map:tex(floorSet.d,128,128,W,D)}));f.rotation.x=-Math.PI/2;room.add(f);
+[[0,-D/2,0],[0,D/2,Math.PI],[-W/2,0,Math.PI/2],[W/2,0,-Math.PI/2]].forEach((a,i)=>{
+const L=lens()[i],wm=wallMat(WS[i]||wallSet),g=new THREE.Group();g.position.set(a[0],0,a[1]);g.rotation.y=a[2];
+const sh=new THREE.Shape();sh.moveTo(-L/2,0);sh.lineTo(L/2,0);sh.lineTo(L/2,H);sh.lineTo(-L/2,H);sh.closePath();
+OP.filter(o=>o.w===i).forEach(o=>{const x0=-L/2+o.p/100,x1=x0+o.wd/100,y0=o.s/100,y1=y0+o.h/100;
+const hp=new THREE.Path();hp.moveTo(x0,y0);hp.lineTo(x1,y0);hp.lineTo(x1,y1);hp.lineTo(x0,y1);hp.closePath();sh.holes.push(hp);addOp(g,o,(x0+x1)/2,y0,y1)});
+g.add(new THREE.Mesh(new THREE.ShapeGeometry(sh),wm));room.add(g)});partitions();info()}
+function opUI(){const L=$('ops');L.innerHTML='';OP.forEach((o,i)=>{const d=document.createElement('div');d.className='row';d.style.marginBottom='6px';
+d.innerHTML='<b>'+(o.t==='door'?'Дверь':'Окно')+'</b><select>'+WN.map((n,k)=>'<option value='+k+(k===o.w?' selected':'')+'>'+n+'</option>').join('')+'</select>'+
+[['p','от левого края'],['wd','ширина'],['h','высота'],['s','от пола']].map(x=>'<label>'+x[1]+' <input type="number" data-k='+x[0]+' value='+o[x[0]]+'></label>').join('')+'<button class="b">✕</button>';
+const upd=()=>{fixOp(o);build();opUI()};
+d.querySelector('select').onchange=e=>{o.w=+e.target.value;upd()};
+d.querySelectorAll('input').forEach(n=>n.onchange=e=>{o[e.target.dataset.k]=+e.target.value;upd()});
+d.querySelector('button').onclick=()=>{OP.splice(i,1);build();opUI()};L.appendChild(d)})}
+function dims(){const g=id=>Math.max(200,Math.min(1500,+$(id).value||300));W=g('rw')/100;D=g('rd')/100;H=g('rh')/100;
+$('rw').value=W*100;$('rd').value=D*100;$('rh').value=H*100;OP.forEach(fixOp);PT.forEach(fixPt);build();clamp();opUI();ptUI()}
+['rw','rd','rh'].forEach(k=>$(k).onchange=dims);
+$('addD').onclick=()=>{const o={t:'door',w:0,p:20,wd:90,h:205,s:0};fixOp(o);OP.push(o);build();opUI()};
+$('addW').onclick=()=>{const o={t:'win',w:0,p:20,wd:120,h:140,s:90};fixOp(o);OP.push(o);build();opUI()};
+let PT=[];
+function fixPt(q){const A=(q.o==='x'?W:D)*100,B=(q.o==='x'?D:W)*100;q.t=Math.max(5,Math.min(q.t||10,50));q.p=Math.max(q.t/2,Math.min(q.p||0,B-q.t/2));q.a=Math.max(0,Math.min(q.a||0,A-30));q.l=Math.max(30,Math.min(q.l||30,A-q.a));q.dw=Math.max(0,Math.min(q.dw||0,q.l-10));q.dp=Math.max(0,Math.min(q.dp||0,q.l-q.dw))}
+function pmat(w,h){if(wallSet.paint)return new THREE.MeshStandardMaterial({color:wallSet.paint});
+return new THREE.MeshStandardMaterial({map:tex(wallSet.d,128,128,Math.max(1,Math.round(w)),Math.max(1,Math.round(h)))})}
+function partitions(){PT.forEach(q=>{const t=q.t/100,len=q.l/100,a=q.a/100,p=q.p/100,dh=Math.min(2.05,H-.1),segs=[];
+if(q.dw>0){const d0=q.dp/100,d1=d0+q.dw/100;segs.push([0,d0,0,H],[d1,len,0,H],[d0,d1,dh,H])}else segs.push([0,len,0,H]);
+segs.forEach(g=>{const w=g[1]-g[0],h=g[3]-g[2];if(w<.001||h<.001)return;
+const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,t),pmat(w,h)),c=a+g[0]+w/2;
+if(q.o==='x')m.position.set(-W/2+c,g[2]+h/2,-D/2+p);else{m.rotation.y=Math.PI/2;m.position.set(-W/2+p,g[2]+h/2,-D/2+c)}
+room.add(m)})})}
+function ptUI(){const L=$('pts');L.innerHTML='';PT.forEach((q,i)=>{const d=document.createElement('div');d.className='row';d.style.marginBottom='6px';
+d.innerHTML='<b>№'+(i+1)+'</b><select><option value="x"'+(q.o==='x'?' selected':'')+'>Вдоль ширины</option><option value="z"'+(q.o==='z'?' selected':'')+'>Вдоль длины</option></select>'+
+[['p','от задней/левой стены'],['a','начало'],['l','длина'],['t','толщина'],['dw','проём (0=нет)'],['dp','отступ проёма']].map(x=>'<label>'+x[1]+' <input type="number" data-k='+x[0]+' value='+q[x[0]]+'></label>').join('')+'<button class="b">✕</button>';
+const upd=()=>{fixPt(q);build();ptUI()};
+d.querySelector('select').onchange=e=>{q.o=e.target.value;upd()};
+d.querySelectorAll('input').forEach(n=>n.onchange=e=>{q[e.target.dataset.k]=+e.target.value;upd()});
+d.querySelector('button').onclick=()=>{PT.splice(i,1);build();ptUI()};L.appendChild(d)})}
+$('addP').onclick=()=>{const q={o:'x',p:Math.round(D*50),a:0,l:Math.round(W*100),t:10,dw:90,dp:Math.round((W*100-90)/2)};fixPt(q);PT.push(q);build();ptUI()};
+function info(){let s='Площадь: '+(W*D).toFixed(2)+' м² · Периметр: '+(2*(W+D)).toFixed(2)+' м · Объём: '+(W*D*H).toFixed(1)+' м³'+(PT.length?' · Перегородок: '+PT.length+', общая длина '+(PT.reduce((n,q)=>n+q.l,0)/100).toFixed(2)+' м':'');
+if(cur){const b=new THREE.Box3().setFromObject(cur),z=b.getSize(new THREE.Vector3()),c=v=>Math.round(v*100);
+s+='<br>Предмет: '+c(z.x)+'×'+c(z.z)+'×'+c(z.y)+' см (Ш×Г×В). До стен: слева '+c(b.min.x+W/2)+', справа '+c(W/2-b.max.x)+', сзади '+c(b.min.z+D/2)+', спереди '+c(D/2-b.max.z)+' см'}
+$('info').innerHTML=s}
+function sw(parent,bg,fn,title){const b=document.createElement('button');b.className='sw';b.style.background=bg;b.title=title||'';b.onclick=()=>{fn();};parent.appendChild(b)}
+paints.forEach(c=>sw($('paints'),c,()=>setWall({paint:c})));
+papers.forEach(p=>sw($('papers'),p.c,()=>setWall(p),p.n));
+floors.forEach(p=>sw($('floors'),p.c,()=>{floorSet=p;build()},p.n));
+
+// furniture
+const items=[];let cur=null;
+function bx(g,w,h,d,col,x,y,z,tint){const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),new THREE.MeshStandardMaterial({color:col}));m.position.set(x,y,z);g.add(m);if(tint)(g.userData.t=g.userData.t||[]).push(m.material)}
+function cy(g,r,h,col,x,y,z,rx,tint){const m=new THREE.Mesh(new THREE.CylinderGeometry(r,r,h,24),new THREE.MeshStandardMaterial({color:col}));m.position.set(x,y,z);if(rx)m.rotation.x=rx;g.add(m);if(tint)(g.userData.t=g.userData.t||[]).push(m.material)}
+function gl(g,w,h,d,x,y,z,col,op){const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),new THREE.MeshStandardMaterial({color:col||'#9fd0ff',transparent:true,opacity:op||.3}));m.position.set(x,y,z);g.add(m)}
+const defs={
+'Диван':g=>{bx(g,2,.4,.9,'#5b7a99',0,.3,0,1);bx(g,2,.5,.2,'#5b7a99',0,.7,-.35,1);bx(g,.2,.6,.9,'#4d6a86',-1,.5,0,1);bx(g,.2,.6,.9,'#4d6a86',1,.5,0,1)},
+'Стол':g=>{bx(g,1.4,.06,.8,'#a07850',0,.75,0,1);[[-.65,-.35],[.65,-.35],[-.65,.35],[.65,.35]].forEach(p=>bx(g,.06,.75,.06,'#7a5a38',p[0],.37,p[1]))},
+'Кровать':g=>{bx(g,1.6,.35,2,'#8a6a4a',0,.18,0);bx(g,1.5,.2,1.9,'#e9e4da',0,.45,.02,1);bx(g,1.6,.9,.1,'#8a6a4a',0,.6,-1);bx(g,.6,.12,.35,'#fff',0,.6,-.7)},
+'Шкаф':g=>{bx(g,1.2,2.1,.6,'#c9b79c',0,1.05,0,1);bx(g,.02,1.9,.02,'#555',0,1.05,.31)},
+'Кресло':g=>{bx(g,.9,.4,.9,'#b5651d',0,.25,0,1);bx(g,.9,.6,.2,'#b5651d',0,.65,-.35,1)},
+'Лампа':g=>{const c=new THREE.Mesh(new THREE.CylinderGeometry(.03,.05,1.5),new THREE.MeshStandardMaterial({color:'#444'}));c.position.y=.75;g.add(c);
+const s=new THREE.Mesh(new THREE.SphereGeometry(.2),new THREE.MeshStandardMaterial({color:'#fff6c9',emissive:'#ffe9a0',emissiveIntensity:.8}));s.position.y=1.6;g.add(s)},
+'Тумбочка':g=>{bx(g,.45,.5,.4,'#a07850',0,.25,0,1);bx(g,.3,.02,.01,'#444',0,.38,.2)},
+'Комод':g=>{bx(g,1.2,.85,.5,'#c9b79c',0,.43,0,1);[.2,.43,.66].forEach(y=>bx(g,.3,.02,.01,'#555',0,y,.26))},
+'Туалетный столик':g=>{bx(g,1,.04,.45,'#e9e4da',0,.75,0,1);[[-.45,-.18],[.45,-.18],[-.45,.18],[.45,.18]].forEach(p=>bx(g,.04,.75,.04,'#bbb',p[0],.37,p[1]));gl(g,.6,.8,.02,0,1.2,-.2,'#cfe6f5',.8)},
+'Ковёр':g=>{bx(g,2,.02,1.4,'#9a8c7a',0,.01,0,1)},
+'Душевая кабина':g=>{bx(g,.9,.08,.9,'#f2f2f2',0,.04,0);gl(g,.9,2,.02,0,1.05,.44);gl(g,.02,2,.9,.44,1.05,0);[[-.44,.44],[.44,-.44],[.44,.44]].forEach(p=>bx(g,.04,2.1,.04,'#bbb',p[0],1.05,p[1]));cy(g,.1,.03,'#aaa',-.3,2.05,-.3);bx(g,.03,2,.03,'#999',-.42,1.05,-.42)},
+'Ванна':g=>{const c='#f4f4f4';bx(g,1.7,.1,.75,c,0,.05,0,1);bx(g,1.7,.55,.08,c,0,.28,-.335,1);bx(g,1.7,.55,.08,c,0,.28,.335,1);bx(g,.08,.55,.6,c,-.81,.28,0,1);bx(g,.08,.55,.6,c,.81,.28,0,1)},
+'Унитаз':g=>{cy(g,.2,.4,'#f4f4f4',0,.2,.05);bx(g,.4,.4,.2,'#f4f4f4',0,.6,-.25);cy(g,.17,.03,'#e0e0e0',0,.42,.05)},
+'Раковина':g=>{bx(g,.6,.8,.45,'#c9b79c',0,.4,0,1);bx(g,.64,.05,.49,'#f4f4f4',0,.83,0);bx(g,.35,.02,.25,'#cfd8dc',0,.86,.02);cy(g,.015,.2,'#999',0,.95,-.15)},
+'Стиральная машина':g=>{bx(g,.6,.85,.6,'#f4f4f4',0,.43,0);cy(g,.2,.04,'#6b7b8c',0,.45,.31,Math.PI/2)},
+'Кухонный модуль':g=>{bx(g,.6,.85,.6,'#e9e4da',0,.43,0,1);bx(g,.62,.04,.64,'#555',0,.87,0);bx(g,.3,.02,.01,'#999',0,.7,.31)},
+'Мойка':g=>{bx(g,.8,.85,.6,'#e9e4da',0,.43,0,1);bx(g,.82,.04,.64,'#555',0,.87,0);bx(g,.45,.02,.4,'#b0b8bf',-.1,.89,0);cy(g,.015,.25,'#999',.25,1,-.2)},
+'Плита':g=>{bx(g,.6,.85,.6,'#ddd',0,.43,0);bx(g,.6,.03,.6,'#222',0,.87,0);[[-.15,-.15],[.15,-.15],[-.15,.15],[.15,.15]].forEach(p=>cy(g,.08,.01,'#555',p[0],.9,p[1]));bx(g,.4,.3,.01,'#333',0,.45,.31)},
+'Холодильник':g=>{bx(g,.6,1.85,.65,'#d7dde2',0,.93,0,1);bx(g,.02,.5,.03,'#777',-.22,1.3,.34);bx(g,.02,.3,.03,'#777',-.22,.6,.34)},
+'Кухонный остров':g=>{bx(g,1.6,.9,.8,'#e9e4da',0,.45,0,1);bx(g,1.8,.04,.95,'#444',0,.92,0)},
+'Стул':g=>{bx(g,.42,.05,.42,'#a07850',0,.45,0,1);bx(g,.42,.5,.04,'#a07850',0,.72,-.19,1);[[-.18,-.18],[.18,-.18],[-.18,.18],[.18,.18]].forEach(p=>bx(g,.04,.45,.04,'#7a5a38',p[0],.22,p[1]))}};
+const cats={'Гостиная':['Диван','Кресло','Стол','Шкаф','Лампа'],'Спальня':['Кровать','Тумбочка','Комод','Туалетный столик','Ковёр'],'Ванная и душ':['Душевая кабина','Ванна','Унитаз','Раковина','Стиральная машина'],'Кухня':['Кухонный модуль','Мойка','Плита','Холодильник','Кухонный остров','Стул']};
+$('furn').style.display='block';
+Object.keys(cats).forEach(c=>{const l=document.createElement('div');l.textContent=c;l.style.cssText='font-size:12px;opacity:.7;margin:6px 0 3px';$('furn').appendChild(l);
+const r=document.createElement('div');r.className='row';$('furn').appendChild(r);
+cats[c].forEach(k=>{const b=document.createElement('button');b.className='b';b.textContent='+ '+k;b.onclick=()=>{const g=new THREE.Group();defs[k](g);S.add(g);items.push(g);select(g)};r.appendChild(b)})});
+['#5b7a99','#b5651d','#7d8f69','#a8553f','#e9e4da','#333'].forEach(c=>sw($('tints'),c,()=>{if(cur&&cur.userData.t)cur.userData.t.forEach(m=>m.color.set(c))}));
+const hl=new THREE.BoxHelper(new THREE.Object3D(),0x3b6ea5);hl.visible=false;S.add(hl);
+function select(g){cur=g;if(g){hl.setFromObject(g);hl.visible=true}else hl.visible=false;info()}
+function clamp(){items.forEach(g=>{const b=new THREE.Box3().setFromObject(g);if(b.min.x<-W/2)g.position.x+=-W/2-b.min.x;if(b.max.x>W/2)g.position.x-=b.max.x-W/2;if(b.min.z<-D/2)g.position.z+=-D/2-b.min.z;if(b.max.z>D/2)g.position.z-=b.max.z-D/2});if(cur)hl.setFromObject(cur);info()}
+$('rot').onclick=()=>{if(cur){cur.rotation.y+=Math.PI/4;clamp()}};
+$('del').onclick=()=>{if(cur){S.remove(cur);items.splice(items.indexOf(cur),1);select(null)}};
+
+// pointer
+const ray=new THREE.Raycaster(),pl=new THREE.Plane(new THREE.Vector3(0,1,0),0),pts=new Map();
+let mode=null,off=new THREE.Vector3(),lastD=0;
+function ndc(e){const r=R.domElement.getBoundingClientRect();return new THREE.Vector2((e.clientX-r.left)/r.width*2-1,-(e.clientY-r.top)/r.height*2+1)}
+function floorPt(e){ray.setFromCamera(ndc(e),C);const p=new THREE.Vector3();return ray.ray.intersectPlane(pl,p)?p:null}
+R.domElement.addEventListener('pointerdown',e=>{R.domElement.setPointerCapture(e.pointerId);pts.set(e.pointerId,e);
+if(pts.size>1){mode='zoom';return}
+ray.setFromCamera(ndc(e),C);const h=ray.intersectObjects(items,true)[0];
+if(h){let g=h.object;while(g.parent!==S)g=g.parent;select(g);const p=floorPt(e);off.copy(g.position).sub(p||g.position);mode='drag'}else{select(null);mode='orbit'}});
+R.domElement.addEventListener('pointermove',e=>{const prev=pts.get(e.pointerId);if(!prev)return;
+if(mode==='zoom'&&pts.size>1){pts.set(e.pointerId,e);const a=[...pts.values()],d=Math.hypot(a[0].clientX-a[1].clientX,a[0].clientY-a[1].clientY);if(lastD)dist=Math.max(4,Math.min(16,dist*lastD/d));lastD=d;return}
+if(mode==='drag'&&cur){const p=floorPt(e);if(p){cur.position.x=p.x+off.x;cur.position.z=p.z+off.z;clamp()}}
+else if(mode==='orbit'){th-=(e.clientX-prev.clientX)*.008;ph=Math.max(.2,Math.min(1.5,ph-(e.clientY-prev.clientY)*.006))}
+pts.set(e.pointerId,e)});
+const up=e=>{pts.delete(e.pointerId);lastD=0;if(!pts.size)mode=null};
+R.domElement.addEventListener('pointerup',up);R.domElement.addEventListener('pointercancel',up);
+R.domElement.addEventListener('wheel',e=>{e.preventDefault();dist=Math.max(4,Math.min(16,dist+e.deltaY*.01))},{passive:false});
+build();opUI();ptUI();(function loop(){cam();R.render(S,C);requestAnimationFrame(loop)})();
+</script></body></html>
